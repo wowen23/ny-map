@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Manhattan Buildings Map</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <!-- Marker Cluster CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        #map {
+            width: 100%;
+            height: 100vh;
+        }
+        .info-box {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            z-index: 1000;
+            max-width: 250px;
+        }
+        .info-box h3 {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+        }
+        .info-box p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+        .leaflet-popup-content {
+            font-size: 14px;
+        }
+        .leaflet-popup-content strong {
+            color: #2c5282;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="info-box">
+        <h3>Manhattan Buildings</h3>
+        <p>Click on clusters to zoom in</p>
+        <p>Click on individual markers to see building details</p>
+        <p id="building-count">Loading...</p>
+    </div>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <!-- Marker Cluster JS -->
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+
+    <script>
+        // Initialize the map centered on Manhattan
+        var map = L.map('map').setView([40.7831, -73.9712], 12);
+
+        // Add OpenStreetMap tiles
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            maxZoom: 19
+        }).addTo(map);
+
+        // Create a marker cluster group
+        var markers = L.markerClusterGroup({
+            chunkedLoading: true,
+            chunkInterval: 200,
+            chunkDelay: 50
+        });
+
+        // Load the building data
+        fetch('manhattan_buildings.json')
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('building-count').textContent =
+                    `${data.length.toLocaleString()} buildings loaded`;
+
+                // Add markers for each building
+                data.forEach(function(building) {
+                    var marker = L.marker([building.lat, building.lon]);
+
+                    // Create popup content
+                    var popupContent = `
+                        <strong>${building.address || 'Address not available'}</strong><br>
+                        <strong>Year Built:</strong> ${building.yearbuilt}<br>
+                        <strong>Stories:</strong> ${building.numfloors}
+                    `;
+
+                    marker.bindPopup(popupContent);
+                    markers.addLayer(marker);
+                });
+
+                // Add the marker cluster group to the map
+                map.addLayer(markers);
+            })
+            .catch(error => {
+                console.error('Error loading building data:', error);
+                document.getElementById('building-count').textContent =
+                    'Error loading data';
+            });
+    </script>
+</body>
+</html>
