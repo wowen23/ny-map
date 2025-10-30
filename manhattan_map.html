@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Manhattan Buildings Map</title>
+    <title>Manhattan Buildings & Demographics Map</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
@@ -22,7 +22,7 @@
             width: 100%;
             height: 100vh;
         }
-        .info-box {
+        .control-panel {
             position: absolute;
             top: 10px;
             right: 10px;
@@ -31,15 +31,60 @@
             border-radius: 5px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.3);
             z-index: 1000;
-            max-width: 250px;
+            max-width: 300px;
         }
-        .info-box h3 {
+        .control-panel h3 {
             margin: 0 0 10px 0;
             font-size: 16px;
         }
-        .info-box p {
-            margin: 5px 0;
+        .control-panel label {
+            display: block;
+            margin: 10px 0 5px 0;
             font-size: 14px;
+            font-weight: bold;
+        }
+        .control-panel select {
+            width: 100%;
+            padding: 5px;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+        .control-panel .checkbox-group {
+            margin: 10px 0;
+        }
+        .control-panel input[type="checkbox"] {
+            margin-right: 8px;
+        }
+        .control-panel p {
+            margin: 5px 0;
+            font-size: 12px;
+            color: #666;
+        }
+        .legend {
+            position: absolute;
+            bottom: 30px;
+            right: 10px;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            z-index: 1000;
+            font-size: 12px;
+            display: none;
+        }
+        .legend h4 {
+            margin: 0 0 8px 0;
+            font-size: 13px;
+        }
+        .legend-item {
+            margin: 3px 0;
+        }
+        .legend-color {
+            display: inline-block;
+            width: 20px;
+            height: 15px;
+            margin-right: 5px;
+            border: 1px solid #999;
         }
         .leaflet-popup-content {
             font-size: 14px;
@@ -51,11 +96,39 @@
 </head>
 <body>
     <div id="map"></div>
-    <div class="info-box">
-        <h3>Manhattan Buildings</h3>
-        <p>Click on clusters to zoom in</p>
-        <p>Click on individual markers to see building details</p>
-        <p id="building-count">Loading...</p>
+
+    <div class="control-panel">
+        <h3>Map Controls</h3>
+
+        <div class="checkbox-group">
+            <label>
+                <input type="checkbox" id="toggle-buildings" checked>
+                Show Buildings
+            </label>
+            <label>
+                <input type="checkbox" id="toggle-census">
+                Show Census Tracts
+            </label>
+            <label>
+                <input type="checkbox" id="toggle-zipcodes">
+                Show ZIP Codes
+            </label>
+        </div>
+
+        <div id="census-controls" style="display: none;">
+            <label for="census-field">Census Data Field:</label>
+            <select id="census-field">
+                <option value="">Loading...</option>
+            </select>
+            <p id="field-description"></p>
+        </div>
+
+        <p id="data-status">Loading...</p>
+    </div>
+
+    <div class="legend" id="legend">
+        <h4 id="legend-title">Legend</h4>
+        <div id="legend-content"></div>
     </div>
 
     <!-- Leaflet JS -->
@@ -74,25 +147,229 @@
             maxZoom: 19
         }).addTo(map);
 
-        // Create a marker cluster group
-        var markers = L.markerClusterGroup({
+        // Global variables
+        var buildingMarkers = L.markerClusterGroup({
             chunkedLoading: true,
             chunkInterval: 200,
             chunkDelay: 50
         });
 
-        // Load the building data
+        var censusLayer = null;
+        var censusData = null;
+        var censusFields = null;
+        var currentField = null;
+        var selectedLayer = null;
+        var zipCodeLayer = null;
+        var zipCodeData = null;
+
+        // Color scale function
+        function getColor(value, min, max) {
+            if (!value || value === 'N' || value === '-') return '#cccccc';
+            var normalized = (parseFloat(value) - min) / (max - min);
+
+            // Color scale from light yellow to dark red
+            var colors = [
+                '#ffffcc',
+                '#ffeda0',
+                '#fed976',
+                '#feb24c',
+                '#fd8d3c',
+                '#fc4e2a',
+                '#e31a1c',
+                '#bd0026'
+            ];
+
+            var idx = Math.floor(normalized * (colors.length - 1));
+            return colors[Math.max(0, Math.min(idx, colors.length - 1))];
+        }
+
+        // Style function for census tracts
+        function style(feature) {
+            if (!currentField || !feature.properties.census_data) {
+                return {
+                    fillColor: '#cccccc',
+                    weight: 1,
+                    opacity: 0.5,
+                    color: 'white',
+                    fillOpacity: 0.3
+                };
+            }
+
+            var value = feature.properties.census_data[currentField];
+            var min = censusData.stats[currentField].min;
+            var max = censusData.stats[currentField].max;
+
+            return {
+                fillColor: getColor(value, min, max),
+                weight: 1,
+                opacity: 0.8,
+                color: 'white',
+                fillOpacity: 0.6
+            };
+        }
+
+        // Popup content for census tracts
+        function onEachFeature(feature, layer) {
+            layer.on('click', function(e) {
+                // Reset previous selection
+                if (selectedLayer) {
+                    if (censusLayer) {
+                        censusLayer.resetStyle(selectedLayer);
+                    }
+                    if (zipCodeLayer) {
+                        zipCodeLayer.resetStyle(selectedLayer);
+                    }
+                }
+
+                // Highlight the clicked layer
+                selectedLayer = e.target;
+                selectedLayer.setStyle({
+                    weight: 3,
+                    color: '#0000ff',
+                    fillOpacity: 0.7
+                });
+
+                // Bring to front
+                if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) {
+                    selectedLayer.bringToFront();
+                }
+
+                var props = feature.properties;
+                var tractName = props.NAME || props.NAMELSAD || 'Unknown Tract';
+
+                var content = `<strong>${tractName}</strong><br>`;
+
+                if (props.census_data && currentField) {
+                    var fieldLabel = censusFields[currentField];
+                    var value = props.census_data[currentField];
+
+                    // Clean up the label
+                    fieldLabel = fieldLabel.replace('Estimate!!', '').replace('!!', ': ');
+
+                    content += `<strong>${fieldLabel}:</strong> ${value || 'N/A'}`;
+                }
+
+                layer.bindPopup(content).openPopup();
+            });
+        }
+
+        // Update census layer with selected field
+        function updateCensusLayer() {
+            if (!censusData || !currentField) return;
+
+            if (censusLayer) {
+                map.removeLayer(censusLayer);
+            }
+
+            // Reset selection when layer is updated
+            selectedLayer = null;
+
+            censusLayer = L.geoJSON(censusData.geojson, {
+                style: style,
+                onEachFeature: onEachFeature
+            });
+
+            if (document.getElementById('toggle-census').checked) {
+                map.addLayer(censusLayer);
+            }
+
+            updateLegend();
+        }
+
+        // Style function for zip codes
+        function zipStyle(feature) {
+            return {
+                fillColor: '#add8e6',  // Light blue
+                weight: 2,
+                opacity: 1,
+                color: '#2c5282',      // Darker blue border
+                fillOpacity: 0.3
+            };
+        }
+
+        // Popup content for zip codes
+        function onEachZipFeature(feature, layer) {
+            layer.on('click', function(e) {
+                // Reset previous selection
+                if (selectedLayer) {
+                    if (censusLayer) {
+                        censusLayer.resetStyle(selectedLayer);
+                    }
+                    if (zipCodeLayer) {
+                        zipCodeLayer.resetStyle(selectedLayer);
+                    }
+                }
+
+                // Highlight the clicked layer
+                selectedLayer = e.target;
+                selectedLayer.setStyle({
+                    weight: 3,
+                    color: '#0000ff',
+                    fillOpacity: 0.6
+                });
+
+                // Bring to front
+                if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) {
+                    selectedLayer.bringToFront();
+                }
+
+                var props = feature.properties;
+                var zipcode = props.MODZCTA || 'Unknown';
+                var label = props.label || zipcode;
+
+                var content = `<strong>ZIP Code: ${zipcode}</strong><br>`;
+                if (label !== zipcode) {
+                    content += `<em>${label}</em>`;
+                }
+
+                layer.bindPopup(content).openPopup();
+            });
+        }
+
+        // Update legend
+        function updateLegend() {
+            var legend = document.getElementById('legend');
+            var content = document.getElementById('legend-content');
+
+            if (!currentField || !document.getElementById('toggle-census').checked) {
+                legend.style.display = 'none';
+                return;
+            }
+
+            legend.style.display = 'block';
+
+            var fieldLabel = censusFields[currentField];
+            document.getElementById('legend-title').textContent =
+                fieldLabel.replace('Estimate!!', '').replace(/!!/g, ' - ');
+
+            var min = censusData.stats[currentField].min;
+            var max = censusData.stats[currentField].max;
+            var range = max - min;
+
+            content.innerHTML = '';
+            for (var i = 7; i >= 0; i--) {
+                var value = min + (range * i / 7);
+                var color = getColor(value, min, max);
+                content.innerHTML += `
+                    <div class="legend-item">
+                        <span class="legend-color" style="background-color: ${color}"></span>
+                        ${value.toLocaleString(undefined, {maximumFractionDigits: 0})}
+                    </div>
+                `;
+            }
+        }
+
+        // Load building data
         fetch('manhattan_buildings.json')
             .then(response => response.json())
             .then(data => {
-                document.getElementById('building-count').textContent =
+                document.getElementById('data-status').textContent =
                     `${data.length.toLocaleString()} buildings loaded`;
 
                 // Add markers for each building
                 data.forEach(function(building) {
                     var marker = L.marker([building.lat, building.lon]);
 
-                    // Create popup content
                     var popupContent = `
                         <strong>${building.address || 'Address not available'}</strong><br>
                         <strong>Year Built:</strong> ${building.yearbuilt}<br>
@@ -100,17 +377,144 @@
                     `;
 
                     marker.bindPopup(popupContent);
-                    markers.addLayer(marker);
+                    buildingMarkers.addLayer(marker);
                 });
 
-                // Add the marker cluster group to the map
-                map.addLayer(markers);
+                map.addLayer(buildingMarkers);
             })
             .catch(error => {
                 console.error('Error loading building data:', error);
-                document.getElementById('building-count').textContent =
-                    'Error loading data';
+                document.getElementById('data-status').textContent =
+                    'Error loading building data';
             });
+
+        // Load zip code data
+        fetch('manhattan_zipcodes.geojson')
+            .then(response => response.json())
+            .then(data => {
+                zipCodeData = data;
+                zipCodeLayer = L.geoJSON(data, {
+                    style: zipStyle,
+                    onEachFeature: onEachZipFeature
+                });
+
+                var statusEl = document.getElementById('data-status');
+                var currentText = statusEl.textContent;
+                statusEl.textContent = currentText + `, ${data.features.length} ZIP codes loaded`;
+            })
+            .catch(error => {
+                console.error('Error loading ZIP code data:', error);
+            });
+
+        // Load census fields
+        Promise.all([
+            fetch('manhattan_census_tracts.geojson').then(r => r.json()),
+            fetch('census_fields.json').then(r => r.json())
+        ])
+        .then(([geojson, fields]) => {
+            censusFields = fields;
+
+            // Calculate statistics for each field
+            var stats = {};
+            var features = geojson.features;
+
+            Object.keys(fields).forEach(function(field) {
+                var values = features
+                    .map(f => f.properties.census_data ? parseFloat(f.properties.census_data[field]) : null)
+                    .filter(v => v !== null && !isNaN(v));
+
+                stats[field] = {
+                    min: Math.min(...values),
+                    max: Math.max(...values)
+                };
+            });
+
+            censusData = {
+                geojson: geojson,
+                stats: stats
+            };
+
+            // Populate field selector
+            var select = document.getElementById('census-field');
+            select.innerHTML = '<option value="">Select a field...</option>';
+
+            // Group fields by category
+            var grouped = {};
+            Object.entries(fields).forEach(([key, label]) => {
+                var category = label.split('!!')[0];
+                if (!grouped[category]) grouped[category] = [];
+                grouped[category].push({key: key, label: label});
+            });
+
+            Object.entries(grouped).forEach(([category, items]) => {
+                var optgroup = document.createElement('optgroup');
+                optgroup.label = category;
+
+                items.forEach(item => {
+                    var option = document.createElement('option');
+                    option.value = item.key;
+                    option.textContent = item.label.replace('Estimate!!', '').replace(/!!/g, ' - ');
+                    optgroup.appendChild(option);
+                });
+
+                select.appendChild(optgroup);
+            });
+
+            var statusEl = document.getElementById('data-status');
+            var currentText = statusEl.textContent;
+            statusEl.textContent = currentText + `, ${features.length} census tracts loaded`;
+        })
+        .catch(error => {
+            console.error('Error loading census data:', error);
+        });
+
+        // Event listeners
+        document.getElementById('toggle-buildings').addEventListener('change', function(e) {
+            if (e.target.checked) {
+                map.addLayer(buildingMarkers);
+            } else {
+                map.removeLayer(buildingMarkers);
+            }
+        });
+
+        document.getElementById('toggle-census').addEventListener('change', function(e) {
+            var controls = document.getElementById('census-controls');
+            if (e.target.checked) {
+                controls.style.display = 'block';
+                if (censusLayer && currentField) {
+                    map.addLayer(censusLayer);
+                    updateLegend();
+                }
+            } else {
+                if (censusLayer) {
+                    map.removeLayer(censusLayer);
+                }
+                document.getElementById('legend').style.display = 'none';
+            }
+        });
+
+        document.getElementById('census-field').addEventListener('change', function(e) {
+            currentField = e.target.value;
+            if (currentField) {
+                updateCensusLayer();
+            }
+        });
+
+        document.getElementById('toggle-zipcodes').addEventListener('change', function(e) {
+            if (e.target.checked) {
+                if (zipCodeLayer) {
+                    map.addLayer(zipCodeLayer);
+                }
+            } else {
+                if (zipCodeLayer) {
+                    map.removeLayer(zipCodeLayer);
+                }
+                // Reset selection if it was a zip code
+                if (selectedLayer && zipCodeLayer && zipCodeLayer.hasLayer(selectedLayer)) {
+                    selectedLayer = null;
+                }
+            }
+        });
     </script>
 </body>
 </html>
