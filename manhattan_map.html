@@ -370,10 +370,45 @@
                 data.forEach(function(building) {
                     var marker = L.marker([building.lat, building.lon]);
 
+                    // Format building area with commas
+                    var bldgArea = building.bldgarea !== 'Unknown' ?
+                        parseInt(building.bldgarea).toLocaleString() + ' sq ft' : 'Unknown';
+
+                    var lotArea = building.lotarea !== 'Unknown' ?
+                        parseInt(building.lotarea).toLocaleString() + ' sq ft' : 'Unknown';
+
+                    var assessValue = building.assesstot !== 'Unknown' ?
+                        '$' + parseInt(building.assesstot).toLocaleString() : 'Unknown';
+
+                    // Decode land use
+                    var landUseLabels = {
+                        '1': 'Residential',
+                        '2': 'Commercial',
+                        '3': 'Industrial',
+                        '4': 'Public/Institution',
+                        '5': 'Transportation',
+                        '6': 'Parks/Recreation',
+                        '7': 'Parking',
+                        '8': 'Vacant',
+                        '9': 'Other',
+                        '10': 'Mixed Use',
+                        '11': 'Open Space'
+                    };
+                    var landUse = landUseLabels[building.landuse] || building.landuse;
+
                     var popupContent = `
                         <strong>${building.address || 'Address not available'}</strong><br>
+                        <hr style="margin: 5px 0;">
                         <strong>Year Built:</strong> ${building.yearbuilt}<br>
-                        <strong>Stories:</strong> ${building.numfloors}
+                        <strong>Stories:</strong> ${building.numfloors}<br>
+                        <strong>Building Area:</strong> ${bldgArea}<br>
+                        <strong>Lot Area:</strong> ${lotArea}<br>
+                        <strong>Land Use:</strong> ${landUse}<br>
+                        <strong>Building Class:</strong> ${building.bldgclass}<br>
+                        <strong>Total Units:</strong> ${building.unitstotal}<br>
+                        <strong>Residential Units:</strong> ${building.unitsres}<br>
+                        <strong>Owner Type:</strong> ${building.ownertype}<br>
+                        <strong>Assessed Value:</strong> ${assessValue}
                     `;
 
                     marker.bindPopup(popupContent);

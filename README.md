@@ -5,10 +5,18 @@ An interactive OpenStreetMap visualization of Manhattan with two data layers:
 ## Features
 
 ### Building Layer
-- 42,132 Manhattan buildings with:
-  - Building addresses
+- 42,132 Manhattan buildings with detailed PLUTO data:
+  - Building address
   - Year built
   - Number of stories
+  - Total building area (sq ft)
+  - Lot area (sq ft)
+  - Land use type (Residential, Commercial, etc.)
+  - Building class code
+  - Total units
+  - Residential units
+  - Owner type
+  - Assessed value
 
 ### Census Demographics Layer
 - 1,292 census tracts with 92 demographic fields including:
@@ -44,7 +52,7 @@ Open `manhattan_map.html` in your browser or visit the GitHub Pages site.
 ## Files
 
 - `manhattan_map.html` - Interactive map viewer
-- `manhattan_buildings.json` - Building data (42,132 buildings, 5.6MB)
+- `manhattan_buildings.json` - Building data with PLUTO details (42,132 buildings, 14MB)
 - `manhattan_census_tracts.geojson` - Census tracts with demographics (1,292 tracts, 11MB)
 - `manhattan_zipcodes.geojson` - ZIP code boundaries (44 ZIP codes, 74KB)
 - `census_fields.json` - Field definitions for census data
